@@ -34,8 +34,6 @@ pentomino_tibble <- tibble(
   select(-coords)  # Remove the original list column
 
 
-
-
 aligned_tibble <- pentomino_tibble %>%
   group_by(piece) %>%
   mutate(
@@ -43,6 +41,8 @@ aligned_tibble <- pentomino_tibble %>%
     y = y - min(y)   # Shift y coordinates to start at 0
   ) %>%
   ungroup()
+
+aligned_tibble |> clipr::write_clip()
 
 
 
@@ -114,6 +114,20 @@ flip <- function() {
 }
 
 
+piece_types <- tibble(
+  piece=c("F","I","L","N","P","T","U","V","W","X","Y","Z"),
+  asp = c(8,2,8,8,8,4,4,4,4,1,8,4),
+  singleside=c(T,F,T,T,T,F,F,F,F,F,T,T)
+)
+
+
+pentomino_sf <-pentomino_sf |>
+  left_join(piece_types) |>
+  mutate(g=str_c(asp,if_else(singleside,"ab","a")))
+
+piece_types |>
+  count(asp,singleside)
+
 ### Plot them out
 p1 <-pentomino_sf |>
   mutate(geometry=geometry+c(2,2)) |>
@@ -122,7 +136,7 @@ p1 <-pentomino_sf |>
   geom_sf(aes(fill=piece, geometry=geometry*rot(90)), alpha=0.8, color="white") +
   geom_sf(aes(fill=piece, geometry=geometry*rot(180)), alpha=0.8, color="white") +
   geom_sf(aes(fill=piece, geometry=geometry*rot(270)), alpha=0.8, color="white") +
-  facet_wrap(~piece,ncol=6) +
+  facet_wrap(g~piece,ncol=6) +
   geom_text(aes(x=0,y=0,label=piece, color=piece), 
             family="Roboto Condensed",size=8) +
   cowplot::theme_nothing() +
@@ -140,7 +154,7 @@ p2 <-pentomino_sf |>
   geom_sf(aes(fill=piece, geometry=geometry*rot(270)), alpha=0.8, color="white") +
   geom_text(aes(x=0,y=0,label=piece, color=piece), 
             family="Roboto Condensed",size=8) +
-  facet_wrap(~piece,ncol=6) +
+  facet_wrap(g~piece,ncol=6) +
   cowplot::theme_nothing() +
   scale_fill_manual(values=pento_col) +
   scale_color_manual(values=pento_col) +
@@ -149,6 +163,34 @@ p2 <-pentomino_sf |>
 library(patchwork)
 p1+p2 + plot_layout(ncol=1)
 
+pentomino_sf |> group_by(g) |>
+  rowwise() |>
+  mutate(geometry=geometry-st_centroid(geometry)) |> 
+  ggplot() +
+  geom_sf(aes(fill=g, geometry=geometry*rot(90)), color="black") +
+  geom_sf(aes(fill=g,  geometry=geometry*rot(180)), color="black") +
+  geom_sf(aes(fill=g, geometry=geometry*rot(270)), color="black") +
+  geom_sf(aes(fill=g, geometry=geometry*rot(0)), color="black") +
+  geom_sf(aes(fill=g, geometry=(geometry*rot(90))*flip()), color="black") +
+  geom_sf(aes(fill=g,  geometry=(geometry*rot(180)*flip())), color="black") +
+  geom_sf(aes(fill=g, geometry=(geometry*rot(270))*flip()), color="black") +
+  geom_sf(aes(fill=g, geometry=(geometry*rot(0))*flip()), color="black") +
+  geom_sf_text(aes(label=piece), color="black", family="Roboto Condensed") +
+  facet_wrap(g~piece, ncol=6) +
+  scale_color_manual(values=retro_col5) +
+  scale_fill_manual(values=str_c(retro_col5,"30")) +
+  cowplot::theme_nothing() 
+
+pentomino_sf |>
+  sf::st_write(path(here::here(),"pentomino_shp","pentomino.shp"))
+
+pentomino_sf |>
+  sf::st_write(path(here::here(),"output","pentomino.geojson"))
+
+pentomino_sf |>
+  sf::st_write(path(here::here(),"output","pentomino.geojson"))
+
+?st_write
 
 sol1 <- c("UUXIIIIINNNFTWYYYYZVUXXXPPLNNFFFTWWYZZZVUUXPPPLLLLFTTTWWZVVV")
 sol2 <- c("UUXIIIIIZWWTTTFLLLLVUXXXPPZZZYWWTFFFNNLVUUXPPPZYYYYWTFNNNVVV")
@@ -290,5 +332,16 @@ pento_p +
 ggsave(filename="pentomino.svg",path=fs::path(here::here(),"output"),
        width=10,height=10,device=svglite::svglite)
 
+# Add a height to your 2D geometries (extrusion)
+pentomino_3d <- pentomino_sf |>
+  mutate(geometry2 = st_zm(st_cast(st_geometry(geometry), "POLYGON"),  zm = "Z"))
 
+# View 3D geometries
+pentomino_3d
+
+pentomino_sf |> st_write("output/pentomino.geojson")
+
+sf::st_drivers() |>
+  as_tibble() |>
+  clipr::write_clip()
 

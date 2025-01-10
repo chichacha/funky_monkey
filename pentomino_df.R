@@ -73,7 +73,7 @@ create_sol_df <- function(sol_text,row_cnt,col_cnt,...){
     mutate(x=as.numeric(str_extract(name,"\\d+"))) |>
     select(x,y,value) |>
     group_by(value) |>
-    mutate(idx_within=row_number(x*y)) |>
+    mutate(idx_within=row_number(pmin(x,y))) |>
     ungroup()
 }
 
@@ -145,7 +145,7 @@ pentomino_solution_big_unnest |>
 pentomino_solution_big_unnest |> count(row_cnt,col_cnt) |> filter(row_cnt==6)
 
 pentomino_solution_big_unnest |>
-  filter(row_cnt==6&col_cnt==10) |>
+  filter(row_cnt==6&col_cnt==10) |> head(5)
   ggplot(aes(x=x,y=y)) +
   geom_tile(aes(fill=value)) +
   facet_wrap_paginate(~sol_idx,ncol=6,nrow=4) +
@@ -153,5 +153,136 @@ pentomino_solution_big_unnest |>
   scale_fill_manual(values=pento_col2) +
   cowplot::theme_nothing()
 
-?facet_wrap_paginate
+
+# Function to create a square polygon from a coordinate
+create_square <- function(x, y) {
+  st_polygon(list(matrix(c(
+    x, y,
+    x + 1, y,
+    x + 1, y + 1,
+    x, y + 1,
+    x, y  # Close the polygon
+  ), ncol = 2, byrow = TRUE)))
+}
+
+
+sample_sf <-pentomino_solution_big_unnest |>
+  filter(row_cnt==6&col_cnt==10) |>
+  rowwise() |>
+  mutate(geometry=list(create_square(x,y))) |>
+  ungroup() |>
+  group_by(value,idx) |>
+  summarise(geometry=st_union(st_sfc(geometry)),.groups="drop") |>
+  st_sf()  #|>
+  
+sample_sf |>
+  filter(idx==26798) |>
+  ggplot() +
+  geom_sf(aes(geometry=geometry-st_centroid(geometry)-c(2,2),fill=value),
+          color="white") +
+  geom_sf(aes(geometry=geometry,fill=value),
+          color="white") +
+  facet_wrap(~idx) +
+  scale_fill_manual(values=pento_col2) +
+  cowplot::theme_nothing()
+
+ggsave(path(here::here(),"output","pentomino.svg"), width=16, height=9,
+       device=svglite::svglite)
+
+
+pentomino_solution[26798,] |> 
+  pmap(create_sol_df) |>
+  pluck(1) |> 
+  ggplot(aes(x=x,y=y,color=value)) +
+  geom_point(size=10) +
+  geom_path(aes(group=value)) +
+  geom_text(aes(label=idx_within), color="white")
+
+pentomino_solution[26797,] |> 
+  pmap(create_sol_df) |>
+  pluck(1) |> 
+  group_by(value) |>
+  arrange(value) |>
+  mutate(x_offset=x-x[1]+1,
+         y_offset=y-y[1]+1) |>
+  ggplot(aes(x=x_offset,y=y_offset)) +
+  geom_tile(aes(color=value,fill=value), alpha=0.5) +
+  geom_tile(aes(x=x,y=y,fill=value)) +
+  #facet_wrap(~value) +
+  scale_fill_manual(values=pento_col2) +
+  scale_color_manual(values=pento_col2) +
+  coord_fixed()
+
+pentomino_solution[26799,] |> 
+  pmap(create_sol_df) |>
+  pluck(1) |> 
+  group_by(value) |>
+  arrange(value) |>
+  mutate(x_offset=x-x[1],
+         y_offset=y-y[1]) |>
+  ggplot(aes(x=x_offset,y=y_offset)) +
+  geom_tile(aes(color=value,fill=value), alpha=0.5) +
+  geom_tile(aes(x=x,y=y,fill=value)) +
+  facet_wrap(~value) +
+  scale_fill_manual(values=pento_col2) +
+  scale_color_manual(values=pento_col2) +
+  coord_fixed()
+
+
+sol_nodes <-pentomino_solution[26768,] |> 
+  pmap(create_sol_df) |>
+  pluck(1) |>
+  mutate(id=row_number())
+
+
+library(tidygraph)
+library(ggraph)
+
+sol_edges <- sol_nodes |>
+  mutate(key=paste(x,y,sep="_")) |>
+  cross_join(sol_nodes) |>
+  filter(id.x!=id.y) |>
+  filter(value.x==value.y) |>
+  filter(abs(x.x-x.y) + abs(y.x-y.y) == 1) |>
+  select(from=id.x,to=id.y)
+
+sol_g <- tbl_graph(nodes=sol_nodes,edges=sol_edges, directed=T)
+
+sol_g <- sol_g |>
+  mutate(deg=centrality_degree(),
+         closeness = centrality_closeness(),
+         btwnness = centrality_betweenness(),
+         eigenvector=centrality_eigen(),
+         comp=group_components())
+
+sol_g |>
+  ggraph(layout="manual", x=x,y=y) +
+  #geom_edge_arc(linewidth=1, color="#303030",aes(width = betweenness)) +
+  geom_edge_link(linewidth=15, aes(color = .N()$value[from]),
+                 linejoin="round", lineend="square") +
+  geom_edge_parallel(color="white") +
+  geom_node_point(aes(color=value,size=btwnness),shape=16) +
+  geom_node_text(aes(label=deg)) +
+  coord_fixed() +
+  scale_color_manual(values=pento_col2) +
+  scale_size_continuous(range=c(3,10)) +
+  scale_edge_color_manual(values=pento_col2) +
+  cowplot::theme_nothing()
+
+sol_nodes |>
+  ggplot(aes(x=x,y=y)) +
+  #geom_tile(aes(fill=factor(idx_within))) +
+  geom_tile(aes(fill=factor(as.numeric(fct_reorder(value,x,sum))%%5))) +
+  coord_fixed() +
+  cowplot::theme_nothing() +
+  scale_fill_manual(values=retro_col5)
+
+ggsave(filename="pentomino_26798.svg",path=fs::path(here::here(),"output"),
+       width=18,height=10,device=svglite::svglite)
+
+ggsave(filename="pentomino_26798_2.svg",path=fs::path(here::here(),"output"),
+       width=18,height=10,device=svglite::svglite)
+
+ggsave(filename="pentomino_26768_2.svg",path=fs::path(here::here(),"output"),
+       width=18,height=10,device=svglite::svglite)
 
