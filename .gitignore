@@ -51,3 +51,9 @@ rsconnect/
 .DS_Store
 
 *.csv
+*.parquet
+*.rds
+
+data/
+
+output/
